@@ -23,7 +23,7 @@
             {
               "value1": "={{$json.headers[\"x-shared-token\"]}}",
               "operation": "equal",
-              "value2": "WEBHOOK_SHARED_TOKEN"
+              "value2": "={{$env.WEBHOOK_SHARED_TOKEN}}"
             }
           ]
         }
@@ -217,7 +217,7 @@
         "jsonParameters": true,
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\"transition\":{\"id\":\"31\"}}"
+        "jsonBody": "={\"transition\":{\"id\":\"{{$env.JIRA_TRANSITION_IN_PROGRESS_ID}}\"}}"
       },
       "id": "12",
       "name": "Transition Jira to In Progress",

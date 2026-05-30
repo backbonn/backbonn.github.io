@@ -30,7 +30,7 @@ Create and test credentials before activating the workflow:
 
 The workflow file is at:
 
-`/tmp/workspace/backbonn/backbonn.github.io/workflows/incident-response-agent.workflow.json`
+`workflows/incident-response-agent.workflow.json`
 
 ### Trigger
 
@@ -96,10 +96,23 @@ Before go-live, replace placeholders in the workflow JSON:
 
 - `ATLASSIAN_BASE_URL`
 - `JIRA_PROJECT_KEY`
+- `JIRA_TRANSITION_IN_PROGRESS_ID`
 - `TEAMS_WEBHOOK_URL`
 - `CONFLUENCE_SPACE_KEY`
 - `OPENAI_MODEL`
+
+Set environment variable in n8n for secure token validation:
+
 - `WEBHOOK_SHARED_TOKEN`
+
+## 8) Jira transition ID note
+
+`JIRA_TRANSITION_IN_PROGRESS_ID` is Jira-instance specific.  
+Get the correct value using:
+
+`GET /rest/api/3/issue/{issueKey}/transitions`
+
+Then update the environment variable in n8n before activation.
 
 ## 7) Validation checklist
 

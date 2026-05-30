@@ -9,9 +9,9 @@ This repository now includes an implementation-ready **Ops Agent Hub** example u
 
 ## Files
 
-- `/tmp/workspace/backbonn/backbonn.github.io/docs/ops-agent-hub.md`  
+- `docs/ops-agent-hub.md`  
   End-to-end setup and implementation guide.
-- `/tmp/workspace/backbonn/backbonn.github.io/workflows/incident-response-agent.workflow.json`  
+- `workflows/incident-response-agent.workflow.json`  
   Importable n8n workflow template for the Incident Response Agent live project.
 
 ## Quick start
