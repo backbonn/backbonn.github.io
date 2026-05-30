@@ -1,0 +1,508 @@
+{
+  "name": "Incident Response Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "ops-agent-hub/incident",
+        "httpMethod": "POST",
+        "responseMode": "responseNode"
+      },
+      "id": "1",
+      "name": "Incident Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.headers[\"x-shared-token\"]}}",
+              "operation": "equal",
+              "value2": "WEBHOOK_SHARED_TOKEN"
+            }
+          ]
+        }
+      },
+      "id": "2",
+      "name": "Validate Shared Token",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        320,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://ATLASSIAN_BASE_URL/rest/api/3/search?jql=project=JIRA_PROJECT_KEY%20AND%20statusCategory!=Done%20AND%20text~\"{{$json.body.service}}\"",
+        "options": {}
+      },
+      "id": "3",
+      "name": "Fetch Jira Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        120
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://ATLASSIAN_BASE_URL/wiki/rest/api/content/search?cql=space=CONFLUENCE_SPACE_KEY%20AND%20text~\"{{$json.body.service}}%20runbook\"",
+        "options": {}
+      },
+      "id": "4",
+      "name": "Fetch Confluence Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        280
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "position"
+      },
+      "id": "5",
+      "name": "Merge Context",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        780,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "OPENAI_MODEL",
+        "messages": {
+          "messageValues": [
+            {
+              "role": "system",
+              "content": "You are an incident response assistant. Produce JSON with keys: summary, recommendations, priority, suggestedOwner, checklist."
+            },
+            {
+              "role": "user",
+              "content": "=Incident payload: {{$json.body}}\nJira: {{$json.issues}}\nConfluence: {{$json.results}}"
+            }
+          ]
+        }
+      },
+      "id": "6",
+      "name": "AI Triage Agent",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.5,
+      "position": [
+        1000,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://ATLASSIAN_BASE_URL/rest/api/3/issue",
+        "jsonParameters": true,
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"fields\":{\"project\":{\"key\":\"JIRA_PROJECT_KEY\"},\"summary\":\"{{$json.summary}}\",\"description\":\"{{$json.recommendations}}\",\"issuetype\":{\"name\":\"Incident\"},\"priority\":{\"name\":\"{{$json.priority}}\"}}}"
+      },
+      "id": "7",
+      "name": "Create or Update Jira",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1220,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "TEAMS_WEBHOOK_URL",
+        "jsonParameters": true,
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"text\":\"Incident {{$json.key}}\\nSummary: {{$json.summary}}\\nRecommendations: {{$json.recommendations}}\\nReply with APPROVE or ESCALATE.\"}"
+      },
+      "id": "8",
+      "name": "Post to Teams",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://ATLASSIAN_BASE_URL/wiki/rest/api/content",
+        "jsonParameters": true,
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"type\":\"page\",\"title\":\"Incident {{$now}} - {{$json.key}}\",\"space\":{\"key\":\"CONFLUENCE_SPACE_KEY\"},\"body\":{\"storage\":{\"value\":\"<p>{{$json.summary}}</p><p>{{$json.checklist}}</p>\",\"representation\":\"storage\"}}}"
+      },
+      "id": "9",
+      "name": "Write Confluence Incident Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1660,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "path": "ops-agent-hub/decision",
+        "httpMethod": "POST",
+        "responseMode": "responseNode"
+      },
+      "id": "10",
+      "name": "Decision Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.body.action}}",
+              "operation": "equal",
+              "value2": "APPROVE"
+            }
+          ]
+        }
+      },
+      "id": "11",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://ATLASSIAN_BASE_URL/rest/api/3/issue/{{$json.body.issueKey}}/transitions",
+        "jsonParameters": true,
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"transition\":{\"id\":\"31\"}}"
+      },
+      "id": "12",
+      "name": "Transition Jira to In Progress",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1660,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "TEAMS_WEBHOOK_URL",
+        "jsonParameters": true,
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"text\":\"Escalation requested for {{$json.body.issueKey}}. Notifying on-call.\"}"
+      },
+      "id": "13",
+      "name": "Notify On-call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1660,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://example-audit-endpoint.internal/ops-agent-hub",
+        "jsonParameters": true,
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"timestamp\":\"{{$now}}\",\"event\":\"{{$json.body.action}}\",\"issue\":\"{{$json.body.issueKey}}\",\"actor\":\"{{$json.body.user}}\"}"
+      },
+      "id": "14",
+      "name": "Audit Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1880,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\":\"accepted\"}",
+        "options": {}
+      },
+      "id": "15",
+      "name": "Respond Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2100,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "16",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        100,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "TEAMS_WEBHOOK_URL",
+        "jsonParameters": true,
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"text\":\"Ops Agent Hub workflow failure: {{$json.execution.error.message}}\"}"
+      },
+      "id": "17",
+      "name": "Alert Failures to Teams",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        520
+      ]
+    }
+  ],
+  "connections": {
+    "Incident Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Shared Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Shared Token": {
+      "main": [
+        [
+          {
+            "node": "Fetch Jira Context",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Confluence Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Jira Context": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Confluence Context": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Context": {
+      "main": [
+        [
+          {
+            "node": "AI Triage Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Triage Agent": {
+      "main": [
+        [
+          {
+            "node": "Create or Update Jira",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create or Update Jira": {
+      "main": [
+        [
+          {
+            "node": "Post to Teams",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Teams": {
+      "main": [
+        [
+          {
+            "node": "Write Confluence Incident Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Confluence Incident Page": {
+      "main": [
+        [
+          {
+            "node": "Respond Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision Webhook": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Transition Jira to In Progress",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify On-call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transition Jira to In Progress": {
+      "main": [
+        [
+          {
+            "node": "Audit Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify On-call": {
+      "main": [
+        [
+          {
+            "node": "Audit Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit Log": {
+      "main": [
+        [
+          {
+            "node": "Respond Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Alert Failures to Teams",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "versionId": "1",
+  "id": "ops-agent-hub-incident-response",
+  "active": false
+}
