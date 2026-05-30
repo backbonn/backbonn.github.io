@@ -112,6 +112,20 @@ Get the correct value using:
 
 `GET /rest/api/3/issue/{issueKey}/transitions`
 
+Example response shape:
+
+```json
+{
+  "transitions": [
+    { "id": "11", "name": "To Do" },
+    { "id": "21", "name": "Selected for Development" },
+    { "id": "31", "name": "In Progress" }
+  ]
+}
+```
+
+Use the `id` where `name` equals your target state (for this workflow: `In Progress`).
+
 Then update the environment variable in n8n before activation.
 
 ## 8) Validation checklist
