@@ -39,8 +39,50 @@
     },
     {
       "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "serviceRaw",
+              "value": "={{ String($json.body?.service ?? '').slice(0, 120) }}",
+              "type": "string"
+            },
+            {
+              "name": "serviceQuery",
+              "value": "={{ encodeURIComponent(String($json.body?.service ?? '').replace(/[\\n\\r\"']/g, ' ').trim()) }}",
+              "type": "string"
+            },
+            {
+              "name": "incidentTitle",
+              "value": "={{ String($json.body?.title ?? 'Incident report').slice(0, 200) }}",
+              "type": "string"
+            },
+            {
+              "name": "incidentDescription",
+              "value": "={{ String($json.body?.description ?? '').slice(0, 2000) }}",
+              "type": "string"
+            },
+            {
+              "name": "requester",
+              "value": "={{ String($json.body?.requester ?? 'unknown') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "18",
+      "name": "Normalize Incident Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        540,
+        200
+      ]
+    },
+    {
+      "parameters": {
         "method": "GET",
-        "url": "=https://ATLASSIAN_BASE_URL/rest/api/3/search?jql=project=JIRA_PROJECT_KEY%20AND%20statusCategory!=Done%20AND%20text~\"{{$json.body.service}}\"",
+        "url": "={{ 'https://ATLASSIAN_BASE_URL/rest/api/3/search?jql=' + encodeURIComponent('project=JIRA_PROJECT_KEY AND statusCategory!=Done AND text~\"' + $json.serviceRaw + '\"') }}",
         "options": {}
       },
       "id": "3",
@@ -48,7 +90,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        560,
+        760,
         120
       ],
       "retryOnFail": true,
@@ -58,7 +100,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "=https://ATLASSIAN_BASE_URL/wiki/rest/api/content/search?cql=space=CONFLUENCE_SPACE_KEY%20AND%20text~\"{{$json.body.service}}%20runbook\"",
+        "url": "={{ 'https://ATLASSIAN_BASE_URL/wiki/rest/api/content/search?cql=' + encodeURIComponent('space=CONFLUENCE_SPACE_KEY AND text~\"' + $json.serviceRaw + ' runbook\"') }}",
         "options": {}
       },
       "id": "4",
@@ -66,7 +108,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        560,
+        760,
         280
       ],
       "retryOnFail": true,
@@ -83,7 +125,39 @@
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
       "position": [
-        780,
+        980,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "incident",
+              "value": "={{ ({ title: $json.incidentTitle, description: $json.incidentDescription, service: $json.serviceRaw, requester: $json.requester }) }}",
+              "type": "object"
+            },
+            {
+              "name": "jiraIssues",
+              "value": "={{ ($json.issues ?? []).slice(0, 5).map(issue => ({ key: issue.key, summary: issue.fields?.summary })) }}",
+              "type": "array"
+            },
+            {
+              "name": "confluencePages",
+              "value": "={{ ($json.results ?? []).slice(0, 5).map(page => ({ id: page.id, title: page.title, link: page._links?.webui })) }}",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "20",
+      "name": "Prepare AI Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1200,
         200
       ]
     },
@@ -96,11 +170,11 @@
           "messageValues": [
             {
               "role": "system",
-              "content": "You are an incident response assistant. Produce JSON with keys: summary, recommendations, priority, suggestedOwner, checklist."
+              "content": "You are an incident response assistant. Return only valid JSON with keys: summary, recommendations, priority, suggestedOwner, checklist. Do not include credentials, secrets, tokens, URLs with secrets, or personal data."
             },
             {
               "role": "user",
-              "content": "=Incident payload: {{$json.body}}\nJira: {{$json.issues}}\nConfluence: {{$json.results}}"
+              "content": "={{ 'Incident input (sanitized): ' + JSON.stringify($json.incident) + '\\nOpen Jira issues (top 5): ' + JSON.stringify($json.jiraIssues) + '\\nConfluence pages (top 5): ' + JSON.stringify($json.confluencePages) }}"
             }
           ]
         }
@@ -110,7 +184,20 @@
       "type": "n8n-nodes-base.openAi",
       "typeVersion": 1.5,
       "position": [
-        1000,
+        1420,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json?.choices?.[0]?.message?.content ?? $json?.text ?? '';\\nlet parsed = {};\\ntry {\\n  parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw ?? {});\\n} catch (error) {\\n  parsed = {};\\n}\\nconst normalize = (value, max = 500) => String(value ?? '').replace(/\\s+/g, ' ').trim().slice(0, max);\\nconst escapeHtml = (value) => normalize(value, 4000).replace(/[&<>\\\"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\\\"': '&quot;', \"'\": '&#39;' }[char]));\\nconst parsedChecklist = Array.isArray(parsed.checklist) ? parsed.checklist : [];\\nconst checklistItems = parsedChecklist\\n  .map((item) => normalize(item, 200))\\n  .filter(Boolean)\\n  .slice(0, 10);\\nconst allowedPriorities = new Set(['Highest', 'High', 'Medium', 'Low', 'Lowest']);\\nconst resolvedPriority = allowedPriorities.has(normalize(parsed.priority, 20)) ? normalize(parsed.priority, 20) : 'Medium';\\nconst summary = normalize(parsed.summary || 'Incident requires triage', 200);\\nconst recommendations = normalize(parsed.recommendations || 'Review logs, validate impact, and assign owner.', 2000);\\nreturn [{\\n  json: {\\n    ...$json,\\n    summary,\\n    recommendations,\\n    checklist: checklistItems,\\n    checklistText: checklistItems.join(' | '),\\n    suggestedOwner: normalize(parsed.suggestedOwner, 100),\\n    priority: resolvedPriority,\\n    summaryHtml: escapeHtml(summary),\\n    checklistHtml: checklistItems.length\\n      ? checklistItems.map((item) => `<li>${escapeHtml(item)}</li>`).join('')\\n      : '<li>Collect logs</li><li>Assess blast radius</li>'\\n  }\\n}];"
+      },
+      "id": "19",
+      "name": "Sanitize AI Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1640,
         200
       ]
     },
@@ -121,14 +208,14 @@
         "jsonParameters": true,
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\"fields\":{\"project\":{\"key\":\"JIRA_PROJECT_KEY\"},\"summary\":\"{{$json.summary}}\",\"description\":\"{{$json.recommendations}}\",\"issuetype\":{\"name\":\"Incident\"},\"priority\":{\"name\":\"{{$json.priority}}\"}}}"
+        "jsonBody": "={{ ({ fields: { project: { key: 'JIRA_PROJECT_KEY' }, summary: $json.summary, description: $json.recommendations, issuetype: { name: 'Incident' }, priority: { name: $json.priority } } }) }}"
       },
       "id": "7",
       "name": "Create or Update Jira",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1220,
+        1860,
         200
       ],
       "retryOnFail": true,
@@ -142,14 +229,14 @@
         "jsonParameters": true,
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\"text\":\"Incident {{$json.key}}\\nSummary: {{$json.summary}}\\nRecommendations: {{$json.recommendations}}\\nReply with APPROVE or ESCALATE.\"}"
+        "jsonBody": "={{ ({ text: 'Incident ' + ($json.key ?? 'TBD') + '\\nSummary: ' + $json.summary + '\\nRecommendations: ' + $json.recommendations + '\\nChecklist: ' + ($json.checklistText || 'Review runbook') + '\\nReply with APPROVE or ESCALATE.' }) }}"
       },
       "id": "8",
       "name": "Post to Teams",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1440,
+        2080,
         200
       ],
       "retryOnFail": true,
@@ -163,14 +250,14 @@
         "jsonParameters": true,
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\"type\":\"page\",\"title\":\"Incident {{$now}} - {{$json.key}}\",\"space\":{\"key\":\"CONFLUENCE_SPACE_KEY\"},\"body\":{\"storage\":{\"value\":\"<p>{{$json.summary}}</p><p>{{$json.checklist}}</p>\",\"representation\":\"storage\"}}}"
+        "jsonBody": "={{ ({ type: 'page', title: `Incident ${$now} - ${$json.key ?? 'TBD'}`, space: { key: 'CONFLUENCE_SPACE_KEY' }, body: { storage: { value: `<p>${$json.summaryHtml}</p><ul>${$json.checklistHtml}</ul>`, representation: 'storage' } } }) }}"
       },
       "id": "9",
       "name": "Write Confluence Incident Page",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1660,
+        2300,
         200
       ]
     },
@@ -185,8 +272,8 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
-        1220,
-        420
+        1860,
+        440
       ]
     },
     {
@@ -206,26 +293,26 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        1440,
-        420
+        2080,
+        440
       ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://ATLASSIAN_BASE_URL/rest/api/3/issue/{{$json.body.issueKey}}/transitions",
+        "url": "={{ 'https://ATLASSIAN_BASE_URL/rest/api/3/issue/' + encodeURIComponent(String($json.body.issueKey ?? '')) + '/transitions' }}",
         "jsonParameters": true,
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\"transition\":{\"id\":\"{{$env.JIRA_TRANSITION_IN_PROGRESS_ID}}\"}}"
+        "jsonBody": "={{ ({ transition: { id: String($env.JIRA_TRANSITION_IN_PROGRESS_ID) } }) }}"
       },
       "id": "12",
       "name": "Transition Jira to In Progress",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1660,
-        360
+        2300,
+        380
       ]
     },
     {
@@ -235,14 +322,14 @@
         "jsonParameters": true,
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\"text\":\"Escalation requested for {{$json.body.issueKey}}. Notifying on-call.\"}"
+        "jsonBody": "={{ ({ text: 'Escalation requested for ' + String($json.body.issueKey ?? 'UNKNOWN') + '. Notifying on-call.' }) }}"
       },
       "id": "13",
       "name": "Notify On-call",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1660,
+        2300,
         500
       ]
     },
@@ -253,15 +340,15 @@
         "jsonParameters": true,
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\"timestamp\":\"{{$now}}\",\"event\":\"{{$json.body.action}}\",\"issue\":\"{{$json.body.issueKey}}\",\"actor\":\"{{$json.body.user}}\"}"
+        "jsonBody": "={{ ({ timestamp: $now, event: String($json.body.action ?? 'UNKNOWN'), issue: String($json.body.issueKey ?? 'UNKNOWN'), actor: String($json.body.user ?? 'unknown') }) }}"
       },
       "id": "14",
       "name": "Audit Log",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1880,
-        420
+        2520,
+        440
       ]
     },
     {
@@ -275,8 +362,8 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        2100,
-        300
+        2740,
+        320
       ]
     },
     {
@@ -287,7 +374,7 @@
       "typeVersion": 1,
       "position": [
         100,
-        520
+        560
       ]
     },
     {
@@ -297,7 +384,7 @@
         "jsonParameters": true,
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\"text\":\"Ops Agent Hub workflow failure: {{$json.execution.error.message}}\"}"
+        "jsonBody": "={{ ({ text: 'Ops Agent Hub workflow failure: ' + String($json.execution?.error?.message ?? 'Unknown error').slice(0, 500) }) }}"
       },
       "id": "17",
       "name": "Alert Failures to Teams",
@@ -305,7 +392,7 @@
       "typeVersion": 4.2,
       "position": [
         320,
-        520
+        560
       ]
     }
   ],
@@ -325,12 +412,7 @@
       "main": [
         [
           {
-            "node": "Fetch Jira Context",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Fetch Confluence Context",
+            "node": "Normalize Incident Input",
             "type": "main",
             "index": 0
           }
@@ -338,6 +420,22 @@
         [
           {
             "node": "Respond Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Incident Input": {
+      "main": [
+        [
+          {
+            "node": "Fetch Jira Context",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Confluence Context",
             "type": "main",
             "index": 0
           }
@@ -370,6 +468,17 @@
       "main": [
         [
           {
+            "node": "Prepare AI Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare AI Context": {
+      "main": [
+        [
+          {
             "node": "AI Triage Agent",
             "type": "main",
             "index": 0
@@ -378,6 +487,17 @@
       ]
     },
     "AI Triage Agent": {
+      "main": [
+        [
+          {
+            "node": "Sanitize AI Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sanitize AI Output": {
       "main": [
         [
           {

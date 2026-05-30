@@ -105,7 +105,7 @@ Set environment variable in n8n for secure token validation:
 
 - `WEBHOOK_SHARED_TOKEN`
 
-## 8) Jira transition ID note
+## 7) Jira transition ID note
 
 `JIRA_TRANSITION_IN_PROGRESS_ID` is Jira-instance specific.  
 Get the correct value using:
@@ -114,7 +114,7 @@ Get the correct value using:
 
 Then update the environment variable in n8n before activation.
 
-## 7) Validation checklist
+## 8) Validation checklist
 
 - Webhook test returns 200 and creates execution
 - Jira issue is created/updated correctly
