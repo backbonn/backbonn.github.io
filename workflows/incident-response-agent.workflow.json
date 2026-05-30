@@ -43,12 +43,12 @@
           "assignments": [
             {
               "name": "serviceRaw",
-              "value": "={{ String($json.body?.service ?? '').slice(0, 120) }}",
+              "value": "={{ String($json.body?.service ?? '').replace(/[\"'`]/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 120) }}",
               "type": "string"
             },
             {
               "name": "serviceQuery",
-              "value": "={{ encodeURIComponent(String($json.body?.service ?? '').replace(/[\\n\\r\"']/g, ' ').trim()) }}",
+              "value": "={{ encodeURIComponent(String($json.body?.service ?? '').replace(/[\"'`]/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 120)) }}",
               "type": "string"
             },
             {
@@ -82,7 +82,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ 'https://ATLASSIAN_BASE_URL/rest/api/3/search?jql=' + encodeURIComponent('project=JIRA_PROJECT_KEY AND statusCategory!=Done AND text~\"' + $json.serviceRaw + '\"') }}",
+        "url": "=https://ATLASSIAN_BASE_URL/rest/api/3/search?jql=project=JIRA_PROJECT_KEY%20AND%20statusCategory!=Done%20AND%20text~%22{{$json.serviceQuery}}%22",
         "options": {}
       },
       "id": "3",
@@ -100,7 +100,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ 'https://ATLASSIAN_BASE_URL/wiki/rest/api/content/search?cql=' + encodeURIComponent('space=CONFLUENCE_SPACE_KEY AND text~\"' + $json.serviceRaw + ' runbook\"') }}",
+        "url": "=https://ATLASSIAN_BASE_URL/wiki/rest/api/content/search?cql=space=CONFLUENCE_SPACE_KEY%20AND%20text~%22{{$json.serviceQuery}}%20runbook%22",
         "options": {}
       },
       "id": "4",
@@ -190,7 +190,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw = $json?.choices?.[0]?.message?.content ?? $json?.text ?? '';\\nlet parsed = {};\\ntry {\\n  parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw ?? {});\\n} catch (error) {\\n  parsed = {};\\n}\\nconst normalize = (value, max = 500) => String(value ?? '').replace(/\\s+/g, ' ').trim().slice(0, max);\\nconst escapeHtml = (value) => normalize(value, 4000).replace(/[&<>\\\"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\\\"': '&quot;', \"'\": '&#39;' }[char]));\\nconst parsedChecklist = Array.isArray(parsed.checklist) ? parsed.checklist : [];\\nconst checklistItems = parsedChecklist\\n  .map((item) => normalize(item, 200))\\n  .filter(Boolean)\\n  .slice(0, 10);\\nconst allowedPriorities = new Set(['Highest', 'High', 'Medium', 'Low', 'Lowest']);\\nconst resolvedPriority = allowedPriorities.has(normalize(parsed.priority, 20)) ? normalize(parsed.priority, 20) : 'Medium';\\nconst summary = normalize(parsed.summary || 'Incident requires triage', 200);\\nconst recommendations = normalize(parsed.recommendations || 'Review logs, validate impact, and assign owner.', 2000);\\nreturn [{\\n  json: {\\n    ...$json,\\n    summary,\\n    recommendations,\\n    checklist: checklistItems,\\n    checklistText: checklistItems.join(' | '),\\n    suggestedOwner: normalize(parsed.suggestedOwner, 100),\\n    priority: resolvedPriority,\\n    summaryHtml: escapeHtml(summary),\\n    checklistHtml: checklistItems.length\\n      ? checklistItems.map((item) => `<li>${escapeHtml(item)}</li>`).join('')\\n      : '<li>Collect logs</li><li>Assess blast radius</li>'\\n  }\\n}];"
+        "jsCode": "const raw = $json?.choices?.[0]?.message?.content ?? $json?.text ?? '';\nlet parsed = {};\ntry {\n  parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw ?? {});\n} catch (error) {\n  parsed = {};\n}\nconst redactSecrets = (text) => String(text)\n  .replace(/(api[_-]?key|token|secret|password)\\s*[:=]\\s*[^\\s,;]+/gi, '$1:[REDACTED]')\n  .replace(/\\b(?:sk|ghp|xoxb|xoxp)-[A-Za-z0-9_-]{10,}\\b/g, '[REDACTED]')\n  .replace(/\\b[A-Za-z0-9_\\-]{24,}\\b/g, '[REDACTED]');\nconst normalize = (value, max = 500) => redactSecrets(value ?? '').replace(/\\s+/g, ' ').trim().slice(0, max);\nconst escapeHtml = (value) => normalize(value, 4000).replace(/[&<>\\\"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\\\"': '&quot;', \"'\": '&#39;' }[char]));\nconst parsedChecklist = Array.isArray(parsed.checklist) ? parsed.checklist : [];\nconst checklistItems = parsedChecklist\n  .map((item) => normalize(item, 200))\n  .filter(Boolean)\n  .slice(0, 10);\nconst allowedPriorities = new Set(['Highest', 'High', 'Medium', 'Low', 'Lowest']);\nconst resolvedPriority = allowedPriorities.has(normalize(parsed.priority, 20)) ? normalize(parsed.priority, 20) : 'Medium';\nconst summary = normalize(parsed.summary || 'Incident requires triage', 200);\nconst recommendations = normalize(parsed.recommendations || 'Review logs, validate impact, and assign owner.', 2000);\nreturn [{\n  json: {\n    ...$json,\n    summary,\n    recommendations,\n    checklist: checklistItems,\n    checklistText: checklistItems.join(' | '),\n    suggestedOwner: normalize(parsed.suggestedOwner, 100),\n    priority: resolvedPriority,\n    summaryHtml: escapeHtml(summary),\n    checklistHtml: checklistItems.length\n      ? checklistItems.map((item) => `<li>${escapeHtml(item)}</li>`).join('')\n      : '<li>Collect logs</li><li>Assess blast radius</li>'\n  }\n}];"
       },
       "id": "19",
       "name": "Sanitize AI Output",
@@ -211,7 +211,7 @@
         "jsonBody": "={{ ({ fields: { project: { key: 'JIRA_PROJECT_KEY' }, summary: $json.summary, description: $json.recommendations, issuetype: { name: 'Incident' }, priority: { name: $json.priority } } }) }}"
       },
       "id": "7",
-      "name": "Create or Update Jira",
+      "name": "Create Jira Issue",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
@@ -250,7 +250,7 @@
         "jsonParameters": true,
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ ({ type: 'page', title: `Incident ${$now} - ${$json.key ?? 'TBD'}`, space: { key: 'CONFLUENCE_SPACE_KEY' }, body: { storage: { value: `<p>${$json.summaryHtml}</p><ul>${$json.checklistHtml}</ul>`, representation: 'storage' } } }) }}"
+        "jsonBody": "={{ ({ type: 'page', title: `Incident ${$json.key ?? $json.incidentTitle ?? 'Untracked'}`, space: { key: 'CONFLUENCE_SPACE_KEY' }, body: { storage: { value: `<p>${$json.summaryHtml}</p><ul>${$json.checklistHtml}</ul>`, representation: 'storage' } } }) }}"
       },
       "id": "9",
       "name": "Write Confluence Incident Page",
@@ -304,7 +304,7 @@
         "jsonParameters": true,
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ ({ transition: { id: String($env.JIRA_TRANSITION_IN_PROGRESS_ID) } }) }}"
+        "jsonBody": "={{ (() => { const transitionId = String($env.JIRA_TRANSITION_IN_PROGRESS_ID ?? '').trim(); if (!transitionId) { throw new Error('Missing JIRA_TRANSITION_IN_PROGRESS_ID environment variable'); } return { transition: { id: transitionId } }; })() }}"
       },
       "id": "12",
       "name": "Transition Jira to In Progress",
@@ -501,18 +501,7 @@
       "main": [
         [
           {
-            "node": "Create or Update Jira",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Create or Update Jira": {
-      "main": [
-        [
-          {
-            "node": "Post to Teams",
+            "node": "Create Jira Issue",
             "type": "main",
             "index": 0
           }
@@ -608,6 +597,17 @@
         [
           {
             "node": "Alert Failures to Teams",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Jira Issue": {
+      "main": [
+        [
+          {
+            "node": "Post to Teams",
             "type": "main",
             "index": 0
           }

@@ -51,7 +51,7 @@ The workflow file is at:
 
 ### Action step
 
-- Create Jira issue when none exists, or update existing ticket.
+- Create Jira issue automatically (you can extend with update logic based on ticket lookup).
 - Post adaptive summary message into Teams.
 - Create/update Confluence incident page.
 
